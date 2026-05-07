@@ -79,6 +79,22 @@ def salvar_nova_oferta(usuario_loja, produto, preco_de, preco_por, link_imagem):
         st.error(f"Erro ao comunicar com o servidor: {e}")
         return False
 
+# NOVO: Função Tática para Excluir a Oferta
+def excluir_oferta_bd(id_oferta):
+    try:
+        gc = get_gspread_client()
+        if gc:
+            ws = gc.open("Base_NoPrecinho").worksheet("Ofertas")
+            celula = ws.find(id_oferta)
+            if celula:
+                ws.delete_rows(celula.row)
+                st.cache_data.clear()
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Erro ao excluir a oferta: {e}")
+        return False
+
 def sincronizar_aba_completa(nome_aba, df_editado):
     try:
         gc = get_gspread_client()
@@ -171,7 +187,6 @@ if st.session_state.usuario_logado is None:
             ofertas_ativas = ofertas_ativas[ofertas_ativas['produto'].astype(str).str.contains(pesquisa, case=False, na=False)]
         
         # --- LÓGICA DE AGRUPAMENTO: Uma Loja -> Múltiplas Ofertas ---
-        # Pegamos a lista de lojas únicas que têm ofertas ativas
         lojas_com_oferta = ofertas_ativas['usuario_loja'].unique()
         
         for usr_loja in lojas_com_oferta:
@@ -217,7 +232,7 @@ if st.session_state.usuario_logado is None:
                         link_wa = f"https://wa.me/55{zap_limpo}?text=Olá! Vi suas ofertas no app No Precinho."
                         html_popup += f"<a href='{link_wa}' target='_blank' style='display:inline-block; background-color:#25D366; color:white; padding:8px 0; text-decoration:none; border-radius:5px; font-weight:bold; width:100%; text-align:center;'>💬 WhatsApp</a>"
                     
-                    html_popup += f"<p style='font-size:8px; color:#999; margin-top:10px; text-align:center;'>* Ofertas válidas por tempo indeterminado ou até durar o estoque.</p>"
+                    html_popup += f"<p style='font-size:9px; color:#888; margin-top:10px; text-align:center; line-height:1.2;'>* Ofertas válidas por tempo indeterminado ou até durar o estoque.</p>"
                     html_popup += "</div></div>"
                     
                     folium.Marker(
@@ -241,16 +256,45 @@ elif st.session_state.perfil_logado == "admin":
     else: st.write("Nenhuma oferta no radar.")
 
 elif st.session_state.perfil_logado == "comerciante":
-    st.header("🏪 Lançar Nova Oferta")
+    st.header("🏪 Central do Comerciante")
     st.markdown("<div class='caixa-destaque'>💡 <b>Múltiplos Produtos:</b> Você pode cadastrar quantos produtos quiser! Todos aparecerão no seu Pin no mapa.</div>", unsafe_allow_html=True)
+    
     with st.form("form_oferta", clear_on_submit=True):
+        st.subheader("🚀 Lançar Nova Oferta")
         p_nome = st.text_input("Produto (Ex: Arroz 5kg)")
         c1, c2 = st.columns(2)
         with c1: p_de = st.text_input("Preço Normal (R$)")
         with c2: p_por = st.text_input("Preço Oferta (R$)")
         p_img = st.text_input("Link da Imagem (ImgBB)")
         st.info("💰 Taxa: R$ 2,00 por anúncio de 24h. PIX: 04994867460")
-        if st.form_submit_button("🚀 Enviar Oferta", use_container_width=True):
+        if st.form_submit_button("Enviar Oferta", use_container_width=True, type="primary"):
             if p_nome and p_por:
                 if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
                     st.success("✅ Oferta enviada! Aguarde a aprovação do Admin.")
+
+    # --- NOVO: GERENCIADOR DE ESTOQUE / EXCLUSÃO ---
+    st.markdown("---")
+    st.subheader("🗑️ Gerenciar Minhas Ofertas Ativas")
+    st.write("O seu estoque acabou? Exclua o anúncio da plataforma usando o botão abaixo:")
+    
+    df_gerenciar = carregar_tabela("Ofertas")
+    if not df_gerenciar.empty:
+        # Filtra apenas as ofertas do usuário logado
+        minhas_ofertas = df_gerenciar[df_gerenciar['usuario_loja'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()]
+        
+        if not minhas_ofertas.empty:
+            for _, row in minhas_ofertas.iterrows():
+                col_info, col_btn = st.columns([4, 1])
+                with col_info:
+                    st.write(f"📦 **{row.get('produto', '')}** — Por: R$ {row.get('preco_por', '')} (Status: *{row.get('status_pagamento', '')}*)")
+                with col_btn:
+                    # Botão dinâmico com ID único da oferta
+                    if st.button("❌ Excluir", key=f"del_{row.get('id_oferta', '')}", use_container_width=True):
+                        with st.spinner("Apagando registro..."):
+                            if excluir_oferta_bd(row.get('id_oferta', '')):
+                                st.success("Oferta removida com sucesso!")
+                                time.sleep(1)
+                                st.rerun()
+                st.markdown("<hr style='margin: 5px 0; border-top: 1px dashed #eee;'>", unsafe_allow_html=True)
+        else:
+            st.info("Você não possui anúncios registrados no momento.")
