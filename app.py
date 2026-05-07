@@ -79,7 +79,6 @@ def salvar_nova_oferta(usuario_loja, produto, preco_de, preco_por, link_imagem):
         st.error(f"Erro ao comunicar com o servidor: {e}")
         return False
 
-# NOVO: Função Tática para Excluir a Oferta
 def excluir_oferta_bd(id_oferta):
     try:
         gc = get_gspread_client()
@@ -171,7 +170,7 @@ with st.sidebar:
 if st.session_state.usuario_logado is None:
     st.title("Descubra as melhores ofertas perto de você! 🛒")
     
-    # Campo de busca tático (com o estilo flutuante aplicado via CSS acima)
+    # Campo de busca tático
     pesquisa = st.text_input("", placeholder="🔍 Digite o que você procura... (Ex: Leite, Arroz, Fralda)", label_visibility="collapsed")
     
     df_ofertas = carregar_tabela("Ofertas")
@@ -180,13 +179,11 @@ if st.session_state.usuario_logado is None:
     m = folium.Map(location=[-8.1189, -35.2925], zoom_start=14)
     
     if not df_ofertas.empty and not df_lojas.empty:
-        # Filtra apenas ofertas aprovadas
         ofertas_ativas = df_ofertas[df_ofertas['status_pagamento'].astype(str).str.strip().str.lower() == 'aprovado']
         
         if pesquisa:
             ofertas_ativas = ofertas_ativas[ofertas_ativas['produto'].astype(str).str.contains(pesquisa, case=False, na=False)]
         
-        # --- LÓGICA DE AGRUPAMENTO: Uma Loja -> Múltiplas Ofertas ---
         lojas_com_oferta = ofertas_ativas['usuario_loja'].unique()
         
         for usr_loja in lojas_com_oferta:
@@ -199,14 +196,11 @@ if st.session_state.usuario_logado is None:
                     nome_loja = loja_info.iloc[0].get('nome_fantasia', 'Loja')
                     zap_loja = str(loja_info.iloc[0].get('whatsapp', '')).strip()
                     
-                    # Filtra todas as ofertas aprovadas deste comerciante específico
                     produtos_da_loja = ofertas_ativas[ofertas_ativas['usuario_loja'] == usr_loja]
                     
-                    # Início do Balão (Popup)
                     html_popup = f"<div style='width:240px; font-family:sans-serif;'>"
                     html_popup += f"<h3 style='color:#0066cc; margin:0 0 10px 0; text-align:center; border-bottom:2px solid #0066cc;'>{nome_loja}</h3>"
                     
-                    # Loop para listar cada produto dentro do mesmo balão
                     for _, row in produtos_da_loja.iterrows():
                         prod = row.get('produto', '')
                         p_de = row.get('preco_de', '')
@@ -224,7 +218,9 @@ if st.session_state.usuario_logado is None:
                     
                     # Botões de Ação da Loja (Ficam no final do balão)
                     html_popup += "<div style='margin-top:15px;'>"
-                    link_maps = f"http://googleusercontent.com/maps.google.com/4{lat},{lon}"
+                    
+                    # --- NOVO LINK OFICIAL DO GOOGLE MAPS PARA ROTAS ---
+                    link_maps = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}"
                     html_popup += f"<a href='{link_maps}' target='_blank' style='display:inline-block; background-color:#ff4b4b; color:white; padding:8px 0; text-decoration:none; border-radius:5px; font-weight:bold; width:100%; text-align:center; margin-bottom:5px;'>📍 Chegar Lá (GPS)</a>"
                     
                     if zap_loja:
@@ -232,7 +228,7 @@ if st.session_state.usuario_logado is None:
                         link_wa = f"https://wa.me/55{zap_limpo}?text=Olá! Vi suas ofertas no app No Precinho."
                         html_popup += f"<a href='{link_wa}' target='_blank' style='display:inline-block; background-color:#25D366; color:white; padding:8px 0; text-decoration:none; border-radius:5px; font-weight:bold; width:100%; text-align:center;'>💬 WhatsApp</a>"
                     
-                    html_popup += f"<p style='font-size:9px; color:#888; margin-top:10px; text-align:center; line-height:1.2;'>* Ofertas válidas por tempo indeterminado ou até durar o estoque.</p>"
+                    html_popup += f"<p style='font-size:8px; color:#999; margin-top:10px; text-align:center;'>* Ofertas válidas por tempo indeterminado ou até durar o estoque.</p>"
                     html_popup += "</div></div>"
                     
                     folium.Marker(
@@ -272,14 +268,12 @@ elif st.session_state.perfil_logado == "comerciante":
                 if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
                     st.success("✅ Oferta enviada! Aguarde a aprovação do Admin.")
 
-    # --- NOVO: GERENCIADOR DE ESTOQUE / EXCLUSÃO ---
     st.markdown("---")
     st.subheader("🗑️ Gerenciar Minhas Ofertas Ativas")
     st.write("O seu estoque acabou? Exclua o anúncio da plataforma usando o botão abaixo:")
     
     df_gerenciar = carregar_tabela("Ofertas")
     if not df_gerenciar.empty:
-        # Filtra apenas as ofertas do usuário logado
         minhas_ofertas = df_gerenciar[df_gerenciar['usuario_loja'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()]
         
         if not minhas_ofertas.empty:
@@ -288,7 +282,6 @@ elif st.session_state.perfil_logado == "comerciante":
                 with col_info:
                     st.write(f"📦 **{row.get('produto', '')}** — Por: R$ {row.get('preco_por', '')} (Status: *{row.get('status_pagamento', '')}*)")
                 with col_btn:
-                    # Botão dinâmico com ID único da oferta
                     if st.button("❌ Excluir", key=f"del_{row.get('id_oferta', '')}", use_container_width=True):
                         with st.spinner("Apagando registro..."):
                             if excluir_oferta_bd(row.get('id_oferta', '')):
