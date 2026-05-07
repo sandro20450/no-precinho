@@ -49,15 +49,13 @@ def carregar_tabela(nome_aba):
     except Exception as e:
         return pd.DataFrame()
 
-# NOVO: Função para salvar a oferta na aba "Ofertas"
 def salvar_nova_oferta(usuario_loja, produto, preco_de, preco_por, link_imagem):
     try:
         gc = get_gspread_client()
         if gc:
             ws = gc.open("Base_NoPrecinho").worksheet("Ofertas")
-            id_oferta = f"OFT-{int(time.time())}" # Gera um código único baseado na hora
+            id_oferta = f"OFT-{int(time.time())}"
             data_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            # Ordem das colunas: id_oferta, usuario_loja, produto, preco_de, preco_por, link_imagem, data_hora, status_pagamento
             nova_linha = [id_oferta, usuario_loja, produto, preco_de, preco_por, link_imagem, data_hora, "pendente"]
             ws.append_row(nova_linha)
             st.cache_data.clear()
@@ -66,22 +64,39 @@ def salvar_nova_oferta(usuario_loja, produto, preco_de, preco_por, link_imagem):
         st.error(f"Erro ao comunicar com o servidor: {e}")
         return False
 
+# NOVO: Função para o Admin salvar as aprovações
+def sincronizar_aba_completa(nome_aba, df_editado):
+    try:
+        gc = get_gspread_client()
+        if gc:
+            ws = gc.open("Base_NoPrecinho").worksheet(nome_aba)
+            df_editado = df_editado.fillna("")
+            dados_lista = [df_editado.columns.values.tolist()] + df_editado.values.tolist()
+            ws.clear()
+            ws.update(values=dados_lista, range_name="A1")
+            st.cache_data.clear()
+            return True
+    except Exception as e:
+        st.error(f"Erro ao sincronizar a aba {nome_aba}: {e}")
+        return False
+
 # =============================================================================
 # --- 3. SISTEMA DE LOGIN ---
 # =============================================================================
 if "usuario_logado" not in st.session_state: st.session_state.usuario_logado = None
 if "perfil_logado" not in st.session_state: st.session_state.perfil_logado = None
+if "nome_logado" not in st.session_state: st.session_state.nome_logado = None
 
 def fazer_login(usuario, senha):
     df_users = carregar_tabela("Usuarios")
     if not df_users.empty and 'usuario' in df_users.columns:
-        user_row = df_users[(df_users['usuario'] == usuario) & (df_users['senha'] == senha)]
+        user_row = df_users[(df_users['usuario'].astype(str).str.strip() == str(usuario).strip()) & (df_users['senha'].astype(str).str.strip() == str(senha).strip())]
         if not user_row.empty:
             status_user = str(user_row.iloc[0].get('status', '')).strip().lower()
             if status_user == 'aprovado':
-                st.session_state.usuario_logado = user_row.iloc[0]['usuario'] # Usamos o login como identificador
-                st.session_state.nome_logado = user_row.iloc[0]['nome']
-                st.session_state.perfil_logado = str(user_row.iloc[0]['perfil']).strip().lower()
+                st.session_state.usuario_logado = str(user_row.iloc[0]['usuario']).strip()
+                st.session_state.nome_logado = str(user_row.iloc[0].get('nome', '')).strip()
+                st.session_state.perfil_logado = str(user_row.iloc[0].get('perfil', '')).strip().lower()
                 st.success("✅ Acesso Concedido!")
                 st.rerun()
             else:
@@ -95,6 +110,7 @@ def fazer_logout():
     st.session_state.usuario_logado = None
     st.session_state.perfil_logado = None
     st.session_state.nome_logado = None
+    st.cache_data.clear()
     st.rerun()
 
 # =============================================================================
@@ -132,14 +148,79 @@ if st.session_state.usuario_logado is None:
     st.title("Descubra as melhores ofertas perto de você! 🛒")
     pesquisa = st.text_input("🔍 O que você procura hoje?", placeholder="Ex: Leite, Carne, Pão...")
     
-    # Mapa Fixo Temporário (Até configurarmos o GPS no próximo passo)
+    # --- CONSTRUÇÃO DO MAPA REAL ---
+    df_ofertas = carregar_tabela("Ofertas")
+    df_lojas = carregar_tabela("Lojas")
+    
+    # Inicia o mapa centralizado
     m = folium.Map(location=[-8.1189, -35.2925], zoom_start=14)
-    folium.Marker([-8.1189, -35.2925], popup="Leite Ninho - R$ 15,00", tooltip="Mercadinho do João").add_to(m)
+    
+    if not df_ofertas.empty and not df_lojas.empty:
+        # Filtra apenas as ofertas que o Admin marcou como "aprovado"
+        ofertas_ativas = df_ofertas[df_ofertas['status_pagamento'].astype(str).str.strip().str.lower() == 'aprovado']
+        
+        # Filtro da barra de pesquisa
+        if pesquisa:
+            ofertas_ativas = ofertas_ativas[ofertas_ativas['produto'].astype(str).str.contains(pesquisa, case=False, na=False)]
+            
+        # Percorre as ofertas ativas e desenha os Pins no mapa
+        for _, oferta in ofertas_ativas.iterrows():
+            usr_loja = str(oferta.get('usuario_loja', '')).strip()
+            # Procura a localização da loja desta oferta
+            loja_info = df_lojas[df_lojas['usuario_dono'].astype(str).str.strip() == usr_loja]
+            
+            if not loja_info.empty:
+                try:
+                    lat = float(str(loja_info.iloc[0].get('latitude', '-8.1189')).replace(',', '.'))
+                    lon = float(str(loja_info.iloc[0].get('longitude', '-35.2925')).replace(',', '.'))
+                    nome_loja = loja_info.iloc[0].get('nome_fantasia', 'Loja')
+                    
+                    produto = oferta.get('produto', '')
+                    preco_novo = oferta.get('preco_por', '')
+                    img = oferta.get('link_imagem', '')
+                    
+                    # Design do Balãozinho que abre ao clicar no Pin
+                    html_popup = f"<div style='width:200px; text-align:center;'><h4 style='color:#0066cc; margin-bottom:5px;'>{nome_loja}</h4>"
+                    html_popup += f"<p style='font-size:16px; font-weight:bold; margin:0;'>{produto}</p>"
+                    html_popup += f"<h3 style='color:#ff4b4b; margin-top:5px;'>R$ {preco_novo}</h3>"
+                    if img and img.startswith("http"):
+                        html_popup += f"<img src='{img}' style='width:100%; border-radius:8px;'>"
+                    html_popup += "</div>"
+                    
+                    folium.Marker(
+                        [lat, lon], 
+                        popup=folium.Popup(html_popup, max_width=250), 
+                        tooltip=f"Ver oferta: {produto}",
+                        icon=folium.Icon(color="red", icon="shopping-cart")
+                    ).add_to(m)
+                except ValueError:
+                    pass # Se a latitude/longitude estiver escrita errada na planilha, ignora o erro
+                
+    # Mostra o mapa na tela
     st_folium(m, width=1200, height=500, returned_objects=[])
 
 elif st.session_state.perfil_logado == "admin":
     st.header("👑 Centro de Comando - Administração")
-    st.info("O painel da diretoria será construído na próxima fase para aprovar as ofertas recebidas!")
+    st.info("💡 Quando um pagamento PIX for confirmado no seu banco, mude o Status da oferta de 'pendente' para 'aprovado' para ela aparecer no mapa.")
+    
+    df_ofertas_admin = carregar_tabela("Ofertas")
+    if not df_ofertas_admin.empty:
+        st.markdown("### 📋 Gestão de Ofertas")
+        df_editado = st.data_editor(
+            df_ofertas_admin, 
+            use_container_width=True, 
+            num_rows="dynamic",
+            column_config={
+                "status_pagamento": st.column_config.SelectboxColumn("Status (Pagamento)", options=["pendente", "aprovado", "expirado"], required=True),
+                "link_imagem": st.column_config.LinkColumn("Foto")
+            }
+        )
+        if st.button("💾 Salvar Liberações", type="primary", use_container_width=True):
+            with st.spinner("Atualizando os radares..."):
+                if sincronizar_aba_completa("Ofertas", df_editado):
+                    st.success("✅ Ofertas atualizadas com sucesso no banco de dados!")
+    else:
+        st.write("Nenhuma oferta cadastrada ainda.")
 
 elif st.session_state.perfil_logado == "comerciante":
     st.header("🏪 Central de Lançamento de Ofertas")
