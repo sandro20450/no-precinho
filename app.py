@@ -26,10 +26,20 @@ st.markdown("""
         margin-bottom: 20px;
     }
     
+    /* ESTILIZANDO OS RADIO BUTTONS COMO ABAS SUPERIORES */
+    div.row-widget.stRadio > div {
+        background-color: #ffffff;
+        padding: 10px;
+        border-radius: 10px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+    }
+    
     .painel-login { background-color: #f8f9fa; padding: 20px; border-radius: 10px; border-top: 4px solid #ff4b4b; }
     .caixa-destaque { background-color: #e6f7ff; padding: 15px; border-radius: 8px; border-left: 5px solid #0066cc; margin-bottom: 20px;}
     
-    /* Estilo para a lista de produtos no Popup */
     .item-oferta { border-bottom: 1px solid #eee; padding: 10px 0; }
     .item-oferta:last-child { border-bottom: none; }
 </style>
@@ -160,7 +170,7 @@ with st.sidebar:
     else:
         st.success(f"👋 Olá, {st.session_state.nome_logado}!")
         if st.session_state.perfil_logado == "admin": st.button("👑 Painel Admin", use_container_width=True)
-        elif st.session_state.perfil_logado == "comerciante": st.button("🏪 Lançar Oferta", use_container_width=True)
+        elif st.session_state.perfil_logado == "comerciante": st.button("🏪 Central da Loja", use_container_width=True)
         st.markdown("---")
         if st.button("🚪 Sair", use_container_width=True): fazer_logout()
 
@@ -171,7 +181,15 @@ if st.session_state.usuario_logado is None:
     st.title("Descubra as melhores ofertas perto de você! 🛒")
     
     # Campo de busca tático
-    pesquisa = st.text_input("", placeholder="🔍 Digite o que você procura... (Ex: Leite, Arroz, Fralda)", label_visibility="collapsed")
+    pesquisa = st.text_input("", placeholder="🔍 Digite o que você procura... (Ex: Leite, Dipirona, Cimento)", label_visibility="collapsed")
+    
+    # Abas Filtro de Categoria
+    filtro_categoria = st.radio(
+        "Filtro", 
+        ["🌎 Todas as Ofertas", "🛒 Alimentos", "💊 Farmácia", "🧱 Construção"], 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
     
     df_ofertas = carregar_tabela("Ofertas")
     df_lojas = carregar_tabela("Lojas")
@@ -190,66 +208,99 @@ if st.session_state.usuario_logado is None:
             loja_info = df_lojas[df_lojas['usuario_dono'].astype(str).str.strip() == usr_loja.strip()]
             
             if not loja_info.empty:
-                try:
-                    lat = float(str(loja_info.iloc[0].get('latitude', '-8.1189')).replace("'", "").strip())
-                    lon = float(str(loja_info.iloc[0].get('longitude', '-35.2925')).replace("'", "").strip())
-                    nome_loja = loja_info.iloc[0].get('nome_fantasia', 'Loja')
-                    zap_loja = str(loja_info.iloc[0].get('whatsapp', '')).strip()
-                    
-                    produtos_da_loja = ofertas_ativas[ofertas_ativas['usuario_loja'] == usr_loja]
-                    
-                    html_popup = f"<div style='width:240px; font-family:sans-serif;'>"
-                    html_popup += f"<h3 style='color:#0066cc; margin:0 0 10px 0; text-align:center; border-bottom:2px solid #0066cc;'>{nome_loja}</h3>"
-                    
-                    for _, row in produtos_da_loja.iterrows():
-                        prod = row.get('produto', '')
-                        p_de = row.get('preco_de', '')
-                        p_por = row.get('preco_por', '')
-                        img = row.get('link_imagem', '')
+                categoria_loja = str(loja_info.iloc[0].get('categoria', 'Alimentos')).strip()
+                
+                # Regra de visualização do Filtro de Categoria
+                mostrar_no_mapa = False
+                if filtro_categoria == "🌎 Todas as Ofertas": mostrar_no_mapa = True
+                elif filtro_categoria == "🛒 Alimentos" and categoria_loja.lower() == "alimentos": mostrar_no_mapa = True
+                elif filtro_categoria == "💊 Farmácia" and categoria_loja.lower() in ["farmácia", "farmacia"]: mostrar_no_mapa = True
+                elif filtro_categoria == "🧱 Construção" and categoria_loja.lower() in ["construção", "construcao"]: mostrar_no_mapa = True
+                
+                if mostrar_no_mapa:
+                    try:
+                        lat = float(str(loja_info.iloc[0].get('latitude', '-8.1189')).replace("'", "").strip())
+                        lon = float(str(loja_info.iloc[0].get('longitude', '-35.2925')).replace("'", "").strip())
+                        nome_loja = loja_info.iloc[0].get('nome_fantasia', 'Loja')
+                        zap_loja = str(loja_info.iloc[0].get('whatsapp', '')).strip()
                         
-                        html_popup += f"<div class='item-oferta'>"
-                        html_popup += f"<p style='font-size:14px; font-weight:bold; margin:0;'>{prod}</p>"
-                        if p_de: html_popup += f"<span style='font-size:11px; color:#888; text-decoration:line-through;'>De: R$ {p_de}</span> "
-                        html_popup += f"<span style='color:#ff4b4b; font-weight:bold; font-size:15px;'>Por: R$ {p_por}</span>"
+                        # Definição de Cores e Ícones do Pin
+                        cor_pin = "red"
+                        icone_pin = "shopping-basket"
+                        if categoria_loja.lower() in ["farmácia", "farmacia"]:
+                            cor_pin = "blue"
+                            icone_pin = "medkit"
+                        elif categoria_loja.lower() in ["construção", "construcao"]:
+                            cor_pin = "orange"
+                            icone_pin = "wrench"
+                            
+                        produtos_da_loja = ofertas_ativas[ofertas_ativas['usuario_loja'] == usr_loja]
                         
-                        if img and img.startswith("http"):
-                            html_popup += f"<img src='{img}' style='width:100%; border-radius:5px; margin-top:5px;'>"
-                        html_popup += "</div>"
-                    
-                    # Botões de Ação da Loja (Ficam no final do balão)
-                    html_popup += "<div style='margin-top:15px;'>"
-                    
-                    # --- NOVO LINK OFICIAL DO GOOGLE MAPS PARA ROTAS ---
-                    link_maps = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}"
-                    html_popup += f"<a href='{link_maps}' target='_blank' style='display:inline-block; background-color:#ff4b4b; color:white; padding:8px 0; text-decoration:none; border-radius:5px; font-weight:bold; width:100%; text-align:center; margin-bottom:5px;'>📍 Chegar Lá (GPS)</a>"
-                    
-                    if zap_loja:
-                        zap_limpo = "".join(filter(str.isdigit, zap_loja))
-                        link_wa = f"https://wa.me/55{zap_limpo}?text=Olá! Vi suas ofertas no app No Precinho."
-                        html_popup += f"<a href='{link_wa}' target='_blank' style='display:inline-block; background-color:#25D366; color:white; padding:8px 0; text-decoration:none; border-radius:5px; font-weight:bold; width:100%; text-align:center;'>💬 WhatsApp</a>"
-                    
-                    html_popup += f"<p style='font-size:8px; color:#999; margin-top:10px; text-align:center;'>* Ofertas válidas por tempo indeterminado ou até durar o estoque.</p>"
-                    html_popup += "</div></div>"
-                    
-                    folium.Marker(
-                        [lat, lon], 
-                        popup=folium.Popup(html_popup, max_width=260), 
-                        tooltip=f"{nome_loja} ({len(produtos_da_loja)} ofertas)",
-                        icon=folium.Icon(color="red", icon="shopping-basket", prefix='fa')
-                    ).add_to(m)
-                except: pass 
+                        html_popup = f"<div style='width:240px; font-family:sans-serif;'>"
+                        html_popup += f"<h3 style='color:#0066cc; margin:0 0 10px 0; text-align:center; border-bottom:2px solid #0066cc;'>{nome_loja}</h3>"
+                        
+                        for _, row in produtos_da_loja.iterrows():
+                            prod = row.get('produto', '')
+                            p_de = row.get('preco_de', '')
+                            p_por = row.get('preco_por', '')
+                            img = row.get('link_imagem', '')
+                            
+                            html_popup += f"<div class='item-oferta'>"
+                            html_popup += f"<p style='font-size:14px; font-weight:bold; margin:0;'>{prod}</p>"
+                            if p_de: html_popup += f"<span style='font-size:11px; color:#888; text-decoration:line-through;'>De: R$ {p_de}</span> "
+                            html_popup += f"<span style='color:#ff4b4b; font-weight:bold; font-size:15px;'>Por: R$ {p_por}</span>"
+                            
+                            if img and img.startswith("http"):
+                                html_popup += f"<img src='{img}' style='width:100%; border-radius:5px; margin-top:5px;'>"
+                            html_popup += "</div>"
+                        
+                        html_popup += "<div style='margin-top:15px;'>"
+                        link_maps = f"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}"
+                        html_popup += f"<a href='{link_maps}' target='_blank' style='display:inline-block; background-color:#ff4b4b; color:white; padding:8px 0; text-decoration:none; border-radius:5px; font-weight:bold; width:100%; text-align:center; margin-bottom:5px;'>📍 Chegar Lá (GPS)</a>"
+                        
+                        if zap_loja:
+                            zap_limpo = "".join(filter(str.isdigit, zap_loja))
+                            link_wa = f"https://wa.me/55{zap_limpo}?text=Olá! Vi suas ofertas no app No Precinho."
+                            html_popup += f"<a href='{link_wa}' target='_blank' style='display:inline-block; background-color:#25D366; color:white; padding:8px 0; text-decoration:none; border-radius:5px; font-weight:bold; width:100%; text-align:center;'>💬 WhatsApp</a>"
+                        
+                        html_popup += f"<p style='font-size:9px; color:#888; margin-top:10px; text-align:center; line-height:1.2;'>* Ofertas válidas por tempo indeterminado ou até durar o estoque.</p>"
+                        html_popup += "</div></div>"
+                        
+                        folium.Marker(
+                            [lat, lon], 
+                            popup=folium.Popup(html_popup, max_width=260), 
+                            tooltip=f"{nome_loja} ({len(produtos_da_loja)} ofertas)",
+                            icon=folium.Icon(color=cor_pin, icon=icone_pin, prefix='fa')
+                        ).add_to(m)
+                    except: pass 
                 
     st_folium(m, width=1200, height=550, returned_objects=[])
 
 elif st.session_state.perfil_logado == "admin":
-    st.header("👑 Administração de Ofertas")
-    df_ofertas_admin = carregar_tabela("Ofertas")
-    if not df_ofertas_admin.empty:
-        df_editado = st.data_editor(df_ofertas_admin, use_container_width=True, num_rows="dynamic",
-            column_config={"status_pagamento": st.column_config.SelectboxColumn("Status", options=["pendente", "aprovado", "expirado"], required=True)})
-        if st.button("💾 Salvar Liberações", type="primary", use_container_width=True):
-            if sincronizar_aba_completa("Ofertas", df_editado): st.success("✅ Sistema atualizado!")
-    else: st.write("Nenhuma oferta no radar.")
+    st.header("👑 Centro de Comando (Admin)")
+    
+    aba_ofertas, aba_lojas = st.tabs(["🛒 Gestão de Ofertas", "🏪 Cadastro de Lojas"])
+    
+    with aba_ofertas:
+        st.info("💡 Mude o Status da oferta de 'pendente' para 'aprovado' para ela aparecer no mapa.")
+        df_ofertas_admin = carregar_tabela("Ofertas")
+        if not df_ofertas_admin.empty:
+            df_editado_ofertas = st.data_editor(df_ofertas_admin, use_container_width=True, num_rows="dynamic",
+                column_config={"status_pagamento": st.column_config.SelectboxColumn("Status", options=["pendente", "aprovado", "expirado"], required=True)})
+            if st.button("💾 Salvar Liberações de Ofertas", type="primary", use_container_width=True):
+                if sincronizar_aba_completa("Ofertas", df_editado_ofertas): st.success("✅ Ofertas atualizadas!")
+        else: st.write("Nenhuma oferta no radar.")
+        
+    with aba_lojas:
+        st.info("💡 Adicione ou edite os dados das Lojas Registradas. Não esqueça do apóstrofo (') nas coordenadas!")
+        df_lojas_admin = carregar_tabela("Lojas")
+        if not df_lojas_admin.empty:
+            df_editado_lojas = st.data_editor(df_lojas_admin, use_container_width=True, num_rows="dynamic",
+                column_config={"categoria": st.column_config.SelectboxColumn("Categoria", options=["Alimentos", "Farmácia", "Construção"], required=True)})
+            if st.button("💾 Salvar Cadastro de Lojas", type="primary", use_container_width=True):
+                if sincronizar_aba_completa("Lojas", df_editado_lojas): st.success("✅ Lojas atualizadas!")
+        else:
+            st.write("Aba de lojas vazia ou não encontrada.")
 
 elif st.session_state.perfil_logado == "comerciante":
     st.header("🏪 Central do Comerciante")
@@ -257,7 +308,7 @@ elif st.session_state.perfil_logado == "comerciante":
     
     with st.form("form_oferta", clear_on_submit=True):
         st.subheader("🚀 Lançar Nova Oferta")
-        p_nome = st.text_input("Produto (Ex: Arroz 5kg)")
+        p_nome = st.text_input("Produto (Ex: Arroz 5kg / Dipirona)")
         c1, c2 = st.columns(2)
         with c1: p_de = st.text_input("Preço Normal (R$)")
         with c2: p_por = st.text_input("Preço Oferta (R$)")
