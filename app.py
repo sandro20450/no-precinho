@@ -11,7 +11,7 @@ import urllib.parse
 # =============================================================================
 # --- 1. CONFIGURAÇÕES GERAIS E CSS CUSTOMIZADO ---
 # =============================================================================
-st.set_page_config(page_title="No Precinho - Ofertas", page_icon="noprecinho.png", layout="wide")
+st.set_page_config(page_title="No Precinho - Ofertas", page_icon="icone.png", layout="wide")
 
 st.markdown("""
 <style>
@@ -184,17 +184,27 @@ with st.sidebar:
 # --- 5. TELA PRINCIPAL (FRONT-END) ---
 # =============================================================================
 if st.session_state.usuario_logado is None:
-    st.title("Descubra as melhores ofertas perto de você! 🛒")
+    
+    # -------------------------------------------------------------------------
+    # COLAR AQUI O LINK DA SUA IMAGEM HOSPEDADA NO IMGBB
+    # -------------------------------------------------------------------------
+    url_sua_logomarca = "https://i.ibb.co/SEU_LINK_DO_IMGBB_AQUI.png" 
+    
+    # NOVO TÍTULO COM A LOGOMARCA SUBSTITUINDO O CARRINHO
+    st.markdown(f"""
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 25px;">
+            <img src="{url_sua_logomarca}" style="width: 50px; height: 50px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
+            <h1 style="margin: 0; padding: 0; font-size: 2.2em; color: #1e3d59;">Descubra as melhores ofertas perto de você!</h1>
+        </div>
+    """, unsafe_allow_html=True)
+    
     pesquisa = st.text_input("", placeholder="🔍 Digite o que você procura... (Ex: Leite, Dipirona, Cimento)", label_visibility="collapsed")
     filtro_categoria = st.radio("Filtro", ["🌎 Todas as Ofertas", "🛒 Alimentos", "💊 Farmácia", "🧱 Construção"], horizontal=True, label_visibility="collapsed")
     
     df_ofertas = carregar_tabela("Ofertas")
     df_lojas = carregar_tabela("Lojas")
-    
-    # Criamos o mapa com um ponto de início base (Vitória de Santo Antão)
     m = folium.Map(location=[-8.1189, -35.2925], zoom_start=14)
     
-    # NOVO: Lista tática para guardar todas as coordenadas ativas
     coordenadas_ativas = []
     
     if not df_ofertas.empty and not df_lojas.empty:
@@ -233,12 +243,36 @@ if st.session_state.usuario_logado is None:
                             nome_loja = loja_info.iloc[0].get('nome_fantasia', 'Loja')
                             zap_loja = str(loja_info.iloc[0].get('whatsapp', '')).strip()
                             
-                            # SALVAMOS A COORDENADA PARA ENQUADRAMENTO FUTURO
                             coordenadas_ativas.append([lat, lon])
                             
-                            cor_pin, icone_pin = "red", "shopping-basket"
-                            if categoria_loja.lower() in ["farmácia", "farmacia"]: cor_pin, icone_pin = "blue", "medkit"
-                            elif categoria_loja.lower() in ["construção", "construcao"]: cor_pin, icone_pin = "orange", "hammer"
+                            # DEFINIÇÃO DE CORES EM DEGRADÊ PARA O EFEITO 3D
+                            cor_clara, cor_escura = "#ff6b6b", "#cc0000" # Vermelho (Alimentos)
+                            icone_pin = "shopping-basket"
+                            
+                            if categoria_loja.lower() in ["farmácia", "farmacia"]: 
+                                cor_clara, cor_escura = "#4dabf7", "#0050b3" # Azul
+                                icone_pin = "medkit"
+                            elif categoria_loja.lower() in ["construção", "construcao"]: 
+                                cor_clara, cor_escura = "#ffa94d", "#d97706" # Laranja
+                                icone_pin = "hammer"
+                                
+                            # NOVO: ESTRUTURA HTML/CSS PARA O PIN 3D FLUTUANTE
+                            pin_3d_html = f"""
+                            <div style="
+                                width: 38px;
+                                height: 38px;
+                                background: radial-gradient(circle at 30% 30%, {cor_clara}, {cor_escura});
+                                border-radius: 50% 50% 50% 0;
+                                transform: rotate(-45deg);
+                                box-shadow: -4px 5px 8px rgba(0,0,0,0.4);
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                border: 2px solid white;
+                            ">
+                                <i class="fa fa-{icone_pin}" style="transform: rotate(45deg); color: white; font-size: 16px; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);"></i>
+                            </div>
+                            """
                                 
                             produtos_da_loja = ofertas_ativas[ofertas_ativas['usuario_loja'] == usr_loja]
                             
@@ -267,11 +301,15 @@ if st.session_state.usuario_logado is None:
                             
                             html_popup += f"<p style='font-size:9px; color:#888; margin-top:10px; text-align:center; line-height:1.2;'>* Ofertas válidas por 24h ou até durar o estoque.<br>Imagem meramente ilustrativa.</p></div></div>"
                             
-                            folium.Marker([lat, lon], popup=folium.Popup(html_popup, max_width=260), tooltip=f"{nome_loja} ({len(produtos_da_loja)} ofertas)", icon=folium.Icon(color=cor_pin, icon=icone_pin, prefix='fa')).add_to(m)
+                            # PIN INJETADO COM O EFEITO 3D DIVICON
+                            folium.Marker(
+                                [lat, lon], 
+                                popup=folium.Popup(html_popup, max_width=260), 
+                                tooltip=f"{nome_loja} ({len(produtos_da_loja)} ofertas)", 
+                                icon=folium.DivIcon(html=pin_3d_html, icon_anchor=(19, 38), popup_anchor=(0, -38))
+                            ).add_to(m)
                         except: pass 
     
-    # --- NOVO: AUTOENQUADRAMENTO DO MAPA ---
-    # Se houver Pins no mapa, ele calcula o centro e dá zoom exato para mostrar todos eles.
     if coordenadas_ativas:
         m.fit_bounds(coordenadas_ativas)
                 
