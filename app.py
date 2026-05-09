@@ -85,7 +85,6 @@ def salvar_novo_usuario_vendedor(usuario, senha, nome, cidade):
         gc = get_gspread_client()
         if gc:
             ws = gc.open("Base_NoPrecinho").worksheet("Usuarios")
-            # usuario, senha, perfil, nome, cidade, status, vencimento
             ws.append_row([usuario, senha, "comerciante", nome, cidade, "pendente", "PENDENTE"])
             st.cache_data.clear()
             return True
@@ -197,7 +196,7 @@ if st.session_state.usuario_logado is None:
         # --- FILTRO 1: APENAS APROVADOS ---
         ofertas_ativas = df_ofertas[df_ofertas['status_pagamento'].astype(str).str.strip().str.lower() == 'aprovado']
         
-        # --- FILTRO 2: APENAS OFERTAS NAS ÚLTIMAS 24H (EXTERMÍNIO AUTOMÁTICO) ---
+        # --- FILTRO 2: APENAS OFERTAS NAS ÚLTIMAS 24H ---
         agora = datetime.now()
         ofertas_24h = []
         for _, row in ofertas_ativas.iterrows():
@@ -233,7 +232,7 @@ if st.session_state.usuario_logado is None:
                             
                             cor_pin, icone_pin = "red", "shopping-basket"
                             if categoria_loja.lower() in ["farmácia", "farmacia"]: cor_pin, icone_pin = "blue", "medkit"
-                            elif categoria_loja.lower() in ["construção", "construcao"]: cor_pin, icone_pin = "orange", "wrench"
+                            elif categoria_loja.lower() in ["construção", "construcao"]: cor_pin, icone_pin = "orange", "hammer"
                                 
                             produtos_da_loja = ofertas_ativas[ofertas_ativas['usuario_loja'] == usr_loja]
                             
@@ -260,7 +259,7 @@ if st.session_state.usuario_logado is None:
                                 zap_limpo = "".join(filter(str.isdigit, zap_loja))
                                 html_popup += f"<a href='https://wa.me/55{zap_limpo}?text=Olá! Vi suas ofertas no app No Precinho.' target='_blank' style='display:inline-block; background-color:#25D366; color:white; padding:8px 0; text-decoration:none; border-radius:5px; font-weight:bold; width:100%; text-align:center;'>💬 WhatsApp</a>"
                             
-                            html_popup += f"<p style='font-size:9px; color:#888; margin-top:10px; text-align:center; line-height:1.2;'>* Ofertas válidas por 24h ou até durar o estoque.</p></div></div>"
+                            html_popup += f"<p style='font-size:9px; color:#888; margin-top:10px; text-align:center; line-height:1.2;'>* Ofertas válidas por 24h ou até durar o estoque.<br>Imagem meramente ilustrativa.</p></div></div>"
                             
                             folium.Marker([lat, lon], popup=folium.Popup(html_popup, max_width=260), tooltip=f"{nome_loja} ({len(produtos_da_loja)} ofertas)", icon=folium.Icon(color=cor_pin, icon=icone_pin, prefix='fa')).add_to(m)
                         except: pass 
@@ -336,12 +335,10 @@ elif st.session_state.perfil_logado == "vendedor":
 elif st.session_state.perfil_logado == "comerciante":
     st.header("🏪 Central do Comerciante")
     
-    # --- FILTRO 3: LIMITE DE 5 OFERTAS DIÁRIAS ---
     df_minhas = carregar_tabela("Ofertas")
     hoje_str = datetime.now().strftime("%Y-%m-%d")
     qtd_hoje = 0
     if not df_minhas.empty:
-        # Filtra as ofertas desse usuário cuja data_hora começa com a data de hoje
         df_hoje = df_minhas[(df_minhas['usuario_loja'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()) & (df_minhas['data_hora'].astype(str).str.startswith(hoje_str))]
         qtd_hoje = len(df_hoje)
         
@@ -357,12 +354,17 @@ elif st.session_state.perfil_logado == "comerciante":
         st.info("💰 Taxa de Lançamento: **R$ 5,00** por anúncio (Validade 24h). PIX: 04994867460")
         
         btn_enviar = st.form_submit_button("Enviar Oferta", use_container_width=True, type="primary")
-        if btn_enviar:
-            if qtd_hoje >= 5:
-                st.error("❌ Limite de 5 ofertas diárias atingido! Volte amanhã para anunciar mais.")
-            elif p_nome and p_por:
-                if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
-                    st.success("✅ Oferta enviada! Aguarde a aprovação do Admin após a confirmação do PIX de R$ 5,00.")
+        
+    if btn_enviar:
+        if qtd_hoje >= 5:
+            st.error("❌ Limite de 5 ofertas diárias atingido! Volte amanhã para anunciar mais.")
+        elif p_nome and p_por:
+            if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
+                st.success("✅ Oferta enviada para o painel do administrador com sucesso!")
+                # BOTÃO DE AVISO RÁPIDO PARA O ADMIN VIA WHATSAPP (558199964261)
+                texto_zap = f"Olá! Acabei de enviar uma nova oferta no app No Precinho (Produto: {p_nome}). Pode conferir o pagamento e liberar, por favor?"
+                link_wa_admin = f"https://wa.me/558199964261?text={texto_zap.replace(' ', '%20')}"
+                st.link_button("📲 Avisar Admin no WhatsApp para Aprovar", link_wa_admin, type="primary", use_container_width=True)
 
     st.markdown("---")
     st.subheader("🗑️ Gerenciar Minhas Ofertas (Ativas e Pendentes)")
