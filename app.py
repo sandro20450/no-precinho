@@ -8,6 +8,7 @@ import folium
 from streamlit_folium import st_folium
 import urllib.parse
 import os
+import base64 # NOVO: Para centralizar a imagem perfeitamente
 
 # =============================================================================
 # --- 1. CONFIGURAÇÕES GERAIS E CSS CUSTOMIZADO ---
@@ -183,23 +184,28 @@ with st.sidebar:
 # =============================================================================
 if st.session_state.usuario_logado is None:
     
-    # --- CABEÇALHO BLINDADO COM O NOME EXATO "noprecinho.png" ---
-    c_logo, c_titulo = st.columns([0.1, 1.1])
-    with c_logo:
-        try:
-            if os.path.exists("noprecinho.png"):
-                st.image("noprecinho.png", width=50)
-            elif os.path.exists("Noprecinho.png"):
-                st.image("Noprecinho.png", width=50)
-            elif os.path.exists("noprecinho.PNG"):
-                st.image("noprecinho.PNG", width=50)
-            else:
-                st.markdown("<h1 style='margin-top: -15px;'>📍</h1>", unsafe_allow_html=True)
-        except:
-            st.markdown("<h1 style='margin-top: -15px;'>📍</h1>", unsafe_allow_html=True)
+    # --- NOVO CABEÇALHO: LOGO MAIOR, CENTRALIZADO, ACIMA DO TEXTO ---
+    try:
+        img_path = None
+        if os.path.exists("noprecinho.png"): img_path = "noprecinho.png"
+        elif os.path.exists("Noprecinho.png"): img_path = "Noprecinho.png"
+        elif os.path.exists("noprecinho.PNG"): img_path = "noprecinho.PNG"
+        
+        if img_path:
+            with open(img_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode()
             
-    with c_titulo:
-        st.markdown("<h1 style='margin-top: -10px;'>Descubra as melhores ofertas perto de você!</h1>", unsafe_allow_html=True)
+            st.markdown(f'''
+                <div style="display: flex; justify-content: center; margin-bottom: 10px; margin-top: 10px;">
+                    <img src="data:image/png;base64,{encoded_string}" width="130" style="border-radius: 18px; box-shadow: 0 8px 16px rgba(0,0,0,0.15);">
+                </div>
+            ''', unsafe_allow_html=True)
+        else:
+            st.markdown("<h1 style='text-align: center; font-size: 60px; margin-top: 10px;'>📍</h1>", unsafe_allow_html=True)
+    except:
+        st.markdown("<h1 style='text-align: center; font-size: 60px; margin-top: 10px;'>📍</h1>", unsafe_allow_html=True)
+        
+    st.markdown("<h1 style='text-align: center; margin-top: 5px; margin-bottom: 30px;'>Descubra as melhores ofertas perto de você!</h1>", unsafe_allow_html=True)
     
     pesquisa = st.text_input("", placeholder="🔍 Digite o que você procura... (Ex: Leite, Dipirona, Cimento)", label_visibility="collapsed")
     filtro_categoria = st.radio("Filtro", ["🌎 Todas as Ofertas", "🛒 Alimentos", "💊 Farmácia", "🧱 Construção"], horizontal=True, label_visibility="collapsed")
