@@ -6,6 +6,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import folium
 from streamlit_folium import st_folium
+import urllib.parse  # NOVO: Para formatar a mensagem do WhatsApp perfeitamente
 
 # =============================================================================
 # --- 1. CONFIGURAÇÕES GERAIS E CSS CUSTOMIZADO ---
@@ -129,7 +130,6 @@ def fazer_login(usuario, senha):
             perfil = str(user_row.iloc[0].get('perfil', '')).strip().lower()
             
             if status_user == 'aprovado':
-                # VALIDAÇÃO DO PLANO ANUAL PARA COMERCIANTES
                 if perfil == "comerciante":
                     vencimento_str = str(user_row.iloc[0].get('vencimento', '')).strip()
                     try:
@@ -202,7 +202,7 @@ if st.session_state.usuario_logado is None:
         for _, row in ofertas_ativas.iterrows():
             try:
                 data_postagem = datetime.strptime(str(row['data_hora']), "%Y-%m-%d %H:%M:%S")
-                if (agora - data_postagem).total_seconds() <= 86400: # 86400 seg = 24 horas
+                if (agora - data_postagem).total_seconds() <= 86400:
                     ofertas_24h.append(row)
             except: pass
         ofertas_ativas = pd.DataFrame(ofertas_24h)
@@ -344,6 +344,14 @@ elif st.session_state.perfil_logado == "comerciante":
         
     st.markdown(f"<div class='caixa-destaque'>💡 <b>O seu Limite Diário:</b> {qtd_hoje}/5 ofertas enviadas hoje.</div>", unsafe_allow_html=True)
     
+    # --- BUSCANDO O NOME DA LOJA PARA O WHATSAPP ---
+    df_lojas_comerciante = carregar_tabela("Lojas")
+    nome_fantasia_loja = st.session_state.nome_logado # Fallback
+    if not df_lojas_comerciante.empty:
+        info_loja = df_lojas_comerciante[df_lojas_comerciante['usuario_dono'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()]
+        if not info_loja.empty:
+            nome_fantasia_loja = str(info_loja.iloc[0].get('nome_fantasia', st.session_state.nome_logado)).strip()
+
     with st.form("form_oferta", clear_on_submit=True):
         st.subheader("🚀 Lançar Nova Oferta")
         p_nome = st.text_input("Produto (Ex: Arroz 5kg)")
@@ -351,7 +359,7 @@ elif st.session_state.perfil_logado == "comerciante":
         with c1: p_de = st.text_input("Preço Normal (R$)")
         with c2: p_por = st.text_input("Preço Oferta (R$)")
         p_img = st.text_input("Link da Imagem (ImgBB)")
-        st.info("💰 Taxa de Lançamento: **R$ 5,00** por anúncio (Validade 24h). PIX SANDRO VITORINO: 81999642681")
+        st.info("💰 Taxa de Lançamento: **R$ 5,00** por anúncio (Validade 24h). PIX: 04994867460")
         
         btn_enviar = st.form_submit_button("Enviar Oferta", use_container_width=True, type="primary")
         
@@ -361,10 +369,13 @@ elif st.session_state.perfil_logado == "comerciante":
         elif p_nome and p_por:
             if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
                 st.success("✅ Oferta enviada para o painel do administrador com sucesso!")
-                # BOTÃO DE AVISO RÁPIDO PARA O ADMIN VIA WHATSAPP (558199964261)
-                texto_zap = f"Olá! Acabei de enviar uma nova oferta no app No Precinho (Produto: {p_nome}). Pode conferir o pagamento e liberar, por favor?"
-                link_wa_admin = f"https://wa.me/558199964261?text={texto_zap.replace(' ', '%20')}"
-                st.link_button("📲 Avisar Admin no WhatsApp para Aprovar", link_wa_admin, type="primary", use_container_width=True)
+                
+                # BOTÃO DE AVISO RÁPIDO PARA O ADMIN (COM NOME DA LOJA E COR VERDE)
+                texto_zap = f"Olá Admin! A loja *{nome_fantasia_loja}* acabou de enviar uma nova oferta (Produto: *{p_nome}*). O PIX já foi realizado, pode conferir e liberar, por favor?"
+                texto_zap_codificado = urllib.parse.quote(texto_zap) # Codificação super segura
+                link_wa_admin = f"https://wa.me/558199964261?text={texto_zap_codificado}"
+                
+                st.markdown(f"<a href='{link_wa_admin}' target='_blank' style='display:block; background-color:#25D366; color:white; text-align:center; padding:10px; border-radius:8px; font-weight:bold; text-decoration:none; margin-top:10px; border: 1px solid #1ebe57;'>📲 Avisar Admin no WhatsApp para Aprovar</a>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.subheader("🗑️ Gerenciar Minhas Ofertas (Ativas e Pendentes)")
