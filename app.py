@@ -9,6 +9,7 @@ from streamlit_folium import st_folium
 import urllib.parse
 import os
 import base64
+import re # NOVO: Para saneamento de dados (limpar HTML)
 
 # =============================================================================
 # --- 1. CONFIGURAÇÕES GERAIS E CSS CUSTOMIZADO ---
@@ -28,11 +29,6 @@ st.markdown("""
     .caixa-destaque { background-color: #e6f7ff; padding: 15px; border-radius: 8px; border-left: 5px solid #0066cc; margin-bottom: 20px;}
     .item-oferta { border-bottom: 1px solid #eee; padding: 10px 0; }
     .item-oferta:last-child { border-bottom: none; }
-    
-    /* ESTILOS PARA A LISTA DE OFERTAS ABAIXO DO MAPA */
-    .card-lista {
-        background-color: #ffffff; padding: 10px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border: 1px solid #f0f0f0; margin-bottom: 10px; display: flex; align-items: center;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -121,14 +117,20 @@ def excluir_oferta_bd(id_oferta):
         return False
     except Exception: return False
 
+# TÁTICA DE SANEAMENTO: Limpa códigos HTML dos campos de preço
+def limpar_html(texto):
+    if not texto or not isinstance(texto, str): return texto
+    # Remove qualquer tag HTML (<...>) do texto
+    padrao_html = re.compile('<.*?>')
+    texto_limpo = re.sub(padrao_html, '', texto)
+    return texto_limpo.strip()
+
 # =============================================================================
 # --- 3. SISTEMA DE LOGIN ---
 # =============================================================================
 if "usuario_logado" not in st.session_state: st.session_state.usuario_logado = None
 if "perfil_logado" not in st.session_state: st.session_state.perfil_logado = None
 if "nome_logado" not in st.session_state: st.session_state.nome_logado = None
-
-# Variável tática de memória para o Zoom do Mapa
 if "alvo_mapa" not in st.session_state: st.session_state.alvo_mapa = None
 
 def fazer_login(usuario, senha):
@@ -201,12 +203,7 @@ if st.session_state.usuario_logado is None:
         if img_path:
             with open(img_path, "rb") as image_file:
                 encoded_string = base64.b64encode(image_file.read()).decode()
-            
-            st.markdown(f'''
-                <div style="display: flex; justify-content: center; margin-bottom: 10px; margin-top: 10px;">
-                    <img src="data:image/png;base64,{encoded_string}" width="130" style="border-radius: 18px; box-shadow: 0 8px 16px rgba(0,0,0,0.15);">
-                </div>
-            ''', unsafe_allow_html=True)
+            st.markdown(f'''<div style="display: flex; justify-content: center; margin-bottom: 10px; margin-top: 10px;"><img src="data:image/png;base64,{encoded_string}" width="130" style="border-radius: 18px; box-shadow: 0 8px 16px rgba(0,0,0,0.15);"></div>''', unsafe_allow_html=True)
         else:
             st.markdown("<h1 style='text-align: center; font-size: 60px; margin-top: 10px;'>📍</h1>", unsafe_allow_html=True)
     except:
@@ -220,15 +217,12 @@ if st.session_state.usuario_logado is None:
     df_ofertas = carregar_tabela("Ofertas")
     df_lojas = carregar_tabela("Lojas")
     
-    # -------------------------------------------------------------
-    # 🗺️ PREPARAÇÃO DO MAPA E DA LISTA DE OFERTAS
-    # -------------------------------------------------------------
     centro_inicial = st.session_state.alvo_mapa if st.session_state.alvo_mapa else [-8.1189, -35.2925]
     zoom_inicial = 18 if st.session_state.alvo_mapa else 14
     m = folium.Map(location=centro_inicial, zoom_start=zoom_inicial)
     
     coordenadas_ativas = []
-    lista_catalogo = [] # Guarda os dados para montar a lista abaixo do mapa
+    lista_catalogo = [] # Dados para a lista abaixo do mapa
     
     if not df_ofertas.empty and not df_lojas.empty:
         ofertas_ativas = df_ofertas[df_ofertas['status_pagamento'].astype(str).str.strip().str.lower() == 'aprovado']
@@ -268,6 +262,7 @@ if st.session_state.usuario_logado is None:
                             
                             coordenadas_ativas.append([lat, lon])
                             
+                            # CORES E ÍCONES 3D
                             cor_clara, cor_escura = "#ff6b6b", "#cc0000" 
                             icone_pin = "shopping-basket"
                             if categoria_loja.lower() in ["farmácia", "farmacia"]: 
@@ -291,10 +286,10 @@ if st.session_state.usuario_logado is None:
                             for _, row in produtos_da_loja.iterrows():
                                 prod, p_de, p_por, img = row.get('produto', ''), row.get('preco_de', ''), row.get('preco_por', ''), row.get('link_imagem', '')
                                 
-                                # Alimentando a lista do Catálogo abaixo do mapa
+                                # Alimentando o catálogo (incluindo categoria para o pin tático)
                                 lista_catalogo.append({
                                     "loja": nome_loja, "produto": prod, "preco_de": p_de, 
-                                    "preco_por": p_por, "img": img, "lat": lat, "lon": lon
+                                    "preco_por": p_por, "categoria": categoria_loja, "lat": lat, "lon": lon
                                 })
                                 
                                 html_popup += f"<div class='item-oferta'><p style='font-size:14px; font-weight:bold; margin:0;'>{prod}</p>"
@@ -313,32 +308,46 @@ if st.session_state.usuario_logado is None:
                             folium.Marker([lat, lon], popup=folium.Popup(html_popup, max_width=260), icon=folium.DivIcon(html=pin_3d_html, icon_anchor=(19, 38), popup_anchor=(0, -38))).add_to(m)
                         except: pass 
     
-    # Faz o enquadramento apenas se não houver um clique vindo da lista abaixo
-    if coordenadas_ativas and not st.session_state.alvo_mapa: 
-        m.fit_bounds(coordenadas_ativas)
-        
+    if coordenadas_ativas and not st.session_state.alvo_mapa: m.fit_bounds(coordenadas_ativas)
     st_folium(m, width=1200, height=550, returned_objects=[])
 
-    # Limpa a mira do mapa logo após renderizar para permitir o zoom normal da próxima vez
-    if st.session_state.alvo_mapa:
-        st.session_state.alvo_mapa = None
+    if st.session_state.alvo_mapa: st.session_state.alvo_mapa = None
 
     # -------------------------------------------------------------
-    # 🛒 CATÁLOGO EM LISTA COM SCROLL ABAIXO DO MAPA
+    # 🛒 CATÁLOGO EM LISTA ABAIXO DO MAPA (V6.1 - APENAS PIN TÁTICO)
     # -------------------------------------------------------------
     if lista_catalogo:
         st.markdown("<h3 style='color:#333; margin-top: 30px; margin-bottom: 15px;'>🔥 Destaques da Categoria</h3>", unsafe_allow_html=True)
         
-        # Caixa de rolagem limitando a visão a cerca de 4/5 itens por vez
         with st.container(height=480):
             for idx, item in enumerate(lista_catalogo):
-                c_img, c_texto, c_btn = st.columns([1.5, 4, 1.5], vertical_alignment="center")
+                # Coluna c_img agora é para o PIN tático (largura ajustada para centralizar)
+                c_img, c_texto, c_btn = st.columns([1, 4.5, 1.5], vertical_alignment="center")
                 
                 with c_img:
-                    if item['img'] and str(item['img']).startswith("http"):
-                        st.markdown(f"<img src='{item['img']}' style='width:100%; height:80px; object-fit:cover; border-radius:8px; border: 1px solid #ddd;'>", unsafe_allow_html=True)
-                    else:
-                        st.markdown("<div style='width:100%; height:80px; background-color:#f0f0f0; border-radius:8px; display:flex; align-items:center; justify-content:center; border: 1px solid #ddd; font-size:24px;'>🛒</div>", unsafe_allow_html=True)
+                    # Configuração tática do PIN baseada na categoria do item
+                    cat = item['categoria']
+                    cor_clara, cor_escura = "#ff6b6b", "#cc0000" # Vermelho
+                    icone_list = "shopping-basket"
+                    
+                    if cat.lower() in ["farmácia", "farmacia"]: 
+                        cor_clara, cor_escura = "#4dabf7", "#0050b3" # Azul
+                        icone_list = "medkit"
+                    elif cat.lower() in ["construção", "construcao"]: 
+                        cor_clara, cor_escura = "#ffa94d", "#d97706" # Laranja
+                        icone_list = "hammer"
+                    
+                    # HTML do PIN tático ajustado para exibição na lista
+                    pin_list_html = f"""
+                    <div style="display:flex; justify-content:center; align-items:center; height: 100%;">
+                        <div style="width:40px; height:40px; background:radial-gradient(circle at 30% 30%, {cor_clara}, {cor_escura});
+                                     border-radius:50% 50% 50% 0; transform:rotate(-45deg); box-shadow:-4px 5px 8px rgba(0,0,0,0.3);
+                                     display:flex; align-items:center; justify-content:center; border:2px solid white;">
+                            <i class="fa fa-{icone_list}" style="transform:rotate(45deg); color:white; font-size:18px;"></i>
+                        </div>
+                    </div>
+                    """
+                    st.markdown(pin_list_html, unsafe_allow_html=True)
                 
                 with c_texto:
                     st.markdown(f"<p style='margin:0; font-weight:bold; font-size:16px; color:#333;'>{item['produto']}</p>", unsafe_allow_html=True)
@@ -351,7 +360,6 @@ if st.session_state.usuario_logado is None:
                     st.markdown(preco_html, unsafe_allow_html=True)
                     
                 with c_btn:
-                    # Botão Tático: Ao clicar, ele aciona o zoom do mapa lá em cima!
                     if st.button("📍 Ver no Mapa", key=f"btn_zoom_{idx}", use_container_width=True):
                         st.session_state.alvo_mapa = [item['lat'], item['lon']]
                         st.rerun()
@@ -366,6 +374,10 @@ elif st.session_state.perfil_logado == "admin":
         st.info("💡 Confirme o PIX de R$ 5,00 e mude o status para 'aprovado'.")
         df_ofertas_admin = carregar_tabela("Ofertas")
         if not df_ofertas_admin.empty:
+            # TÁTICA DE SANEAMENTO: Limpa os preços antes de mostrar na tabela
+            df_ofertas_admin['preco_de'] = df_ofertas_admin['preco_de'].apply(limpar_html)
+            df_ofertas_admin['preco_por'] = df_ofertas_admin['preco_por'].apply(limpar_html)
+            
             df_editado_ofertas = st.data_editor(df_ofertas_admin, use_container_width=True, num_rows="dynamic",
                 column_config={"status_pagamento": st.column_config.SelectboxColumn("Status", options=["pendente", "aprovado", "expirado"], required=True), "link_imagem": st.column_config.LinkColumn("Foto")})
             if st.button("💾 Salvar Ofertas", type="primary", use_container_width=True, key="btn_off"):
@@ -396,53 +408,24 @@ elif st.session_state.perfil_logado == "vendedor":
     
     with st.expander("👤 1. Cadastrar Novo Comerciante (Acesso)", expanded=True):
         with st.form("form_novo_user", clear_on_submit=True):
-            u_login = st.text_input("Nome de Usuário (Para Login)")
-            u_senha = st.text_input("Senha (Para Login)")
-            u_nome = st.text_input("Nome Completo do Dono")
-            u_cid = st.text_input("Cidade")
+            u_login, u_senha, u_nome, u_cid = st.text_input("Usuário"), st.text_input("Senha"), st.text_input("Nome"), st.text_input("Cidade")
             if st.form_submit_button("Enviar Cadastro do Dono", type="primary"):
                 if u_login and u_senha:
-                    if salvar_novo_usuario_vendedor(u_login, u_senha, u_nome, u_cid):
-                        st.success(f"Comerciante {u_nome} enviado para análise!")
+                    if salvar_novo_usuario_vendedor(u_login, u_senha, u_nome, u_cid): st.success("Enviado!")
                 else: st.error("Preencha Login e Senha.")
                 
     with st.expander("🏪 2. Cadastrar Loja (Endereço e Mapa)", expanded=False):
         with st.form("form_nova_loja", clear_on_submit=True):
-            l_dono = st.text_input("Usuário do Dono (O mesmo digitado acima)")
-            l_nome = st.text_input("Nome Fantasia (Aparece no Mapa)")
-            l_cat = st.selectbox("Categoria", ["Alimentos", "Farmácia", "Construção"])
-            l_end = st.text_input("Endereço Completo")
-            l_zap = st.text_input("WhatsApp (Só números)")
-            l_inst = st.text_input("Instagram")
-            st.warning("⚠️ DICA DE GPS: Use o formato -8.1234 usando PONTO. O sistema blindará sozinho com apóstrofo.")
-            l_lat = st.text_input("Latitude (Ex: -8.1189)")
-            l_lon = st.text_input("Longitude (Ex: -35.2925)")
-            
+            l_dono, l_nome, l_cat, l_end, l_zap, l_inst, l_lat, l_lon = st.text_input("Usuário Dono"), st.text_input("Nome Fantasia"), st.selectbox("Categoria", ["Alimentos", "Farmácia", "Construção"]), st.text_input("Endereço"), st.text_input("WhatsApp"), st.text_input("Instagram"), st.text_input("Latitude"), st.text_input("Longitude")
             if st.form_submit_button("Enviar Dados da Loja", type="primary"):
                 if l_dono and l_lat and l_lon:
-                    if salvar_nova_loja_vendedor(l_dono, l_nome, l_end, l_zap, l_inst, l_lat, l_lon, l_cat):
-                        st.success("Loja cadastrada com sucesso!")
+                    if salvar_nova_loja_vendedor(l_dono, l_nome, l_end, l_zap, l_inst, l_lat, l_lon, l_cat): st.success("Cadastrada!")
                 else: st.error("Dono e Coordenadas são obrigatórios!")
 
 elif st.session_state.perfil_logado == "comerciante":
     st.header("🏪 Central do Comerciante")
-    
     df_minhas = carregar_tabela("Ofertas")
-    hoje_str = datetime.now().strftime("%Y-%m-%d")
-    qtd_hoje = 0
-    if not df_minhas.empty:
-        df_hoje = df_minhas[(df_minhas['usuario_loja'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()) & (df_minhas['data_hora'].astype(str).str.startswith(hoje_str))]
-        qtd_hoje = len(df_hoje)
-        
-    st.markdown(f"<div class='caixa-destaque'>💡 <b>O seu Limite Diário:</b> {qtd_hoje}/5 ofertas enviadas hoje.</div>", unsafe_allow_html=True)
     
-    df_lojas_comerciante = carregar_tabela("Lojas")
-    nome_fantasia_loja = st.session_state.nome_logado
-    if not df_lojas_comerciante.empty:
-        info_loja = df_lojas_comerciante[df_lojas_comerciante['usuario_dono'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()]
-        if not info_loja.empty:
-            nome_fantasia_loja = str(info_loja.iloc[0].get('nome_fantasia', st.session_state.nome_logado)).strip()
-
     with st.form("form_oferta", clear_on_submit=True):
         st.subheader("🚀 Lançar Nova Oferta")
         p_nome = st.text_input("Produto (Ex: Arroz 5kg)")
@@ -451,37 +434,23 @@ elif st.session_state.perfil_logado == "comerciante":
         with c2: p_por = st.text_input("Preço Oferta (R$)")
         p_img = st.text_input("Link da Imagem (ImgBB)")
         st.info("💰 Taxa de Lançamento: **R$ 5,00** por anúncio (Validade 24h). PIX: 04994867460")
-        
         btn_enviar = st.form_submit_button("Enviar Oferta", use_container_width=True, type="primary")
         
-    if btn_enviar:
-        if qtd_hoje >= 5:
-            st.error("❌ Limite de 5 ofertas diárias atingido! Volte amanhã para anunciar mais.")
-        elif p_nome and p_por:
-            if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
-                st.success("✅ Oferta enviada para o painel do administrador com sucesso!")
-                
-                texto_zap = f"Olá Admin! A loja *{nome_fantasia_loja}* acabou de enviar uma nova oferta (Produto: *{p_nome}*). O PIX já foi realizado, pode conferir e liberar, por favor?"
-                texto_zap_codificado = urllib.parse.quote(texto_zap)
-                link_wa_admin = f"https://wa.me/558199964261?text={texto_zap_codificado}"
-                
-                st.markdown(f"<a href='{link_wa_admin}' target='_blank' style='display:block; background-color:#25D366; color:white; text-align:center; padding:10px; border-radius:8px; font-weight:bold; text-decoration:none; margin-top:10px; border: 1px solid #1ebe57;'>📲 Avisar Admin no WhatsApp para Aprovar</a>", unsafe_allow_html=True)
+    if btn_enviar and p_nome and p_por:
+        if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
+            st.success("✅ Oferta enviada!")
+            texto_zap_codificado = urllib.parse.quote(f"Olá Admin! Enviei uma nova oferta: *{p_nome}*.")
+            link_wa_admin = f"https://wa.me/558199964261?text={texto_zap_codificado}"
+            st.markdown(f"<a href='{link_wa_admin}' target='_blank' style='display:block; background-color:#25D366; color:white; text-align:center; padding:10px; border-radius:8px; font-weight:bold; text-decoration:none; margin-top:10px;'>📲 Avisar Admin no WhatsApp</a>", unsafe_allow_html=True)
 
     st.markdown("---")
-    st.subheader("🗑️ Gerenciar Minhas Ofertas (Ativas e Pendentes)")
+    st.subheader("🗑️ Gerenciar Ofertas")
     if not df_minhas.empty:
-        minhas_totais = df_minhas[df_minhas['usuario_loja'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()]
-        if not minhas_totais.empty:
-            for _, row in minhas_totais.iterrows():
-                col_info, col_btn = st.columns([4, 1])
-                with col_info:
-                    st.write(f"📦 **{row.get('produto', '')}** — R$ {row.get('preco_por', '')} (Status: *{row.get('status_pagamento', '')}*)")
-                with col_btn:
-                    if st.button("❌ Excluir", key=f"del_{row.get('id_oferta', '')}", use_container_width=True):
-                        with st.spinner("Apagando registro..."):
-                            if excluir_oferta_bd(row.get('id_oferta', '')):
-                                st.success("Removido!")
-                                time.sleep(1)
-                                st.rerun()
-                st.markdown("<hr style='margin: 2px 0; border-top: 1px dashed #eee;'>", unsafe_allow_html=True)
-        else: st.info("Sem anúncios no momento.")
+        minhas = df_minhas[df_minhas['usuario_loja'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()]
+        for _, row in minhas.iterrows():
+            col_info, col_btn = st.columns([4, 1])
+            with col_info: st.write(f"📦 **{row.get('produto', '')}** — R$ {row.get('preco_por', '')}")
+            with col_btn:
+                if st.button("❌", key=f"del_{row.get('id_oferta', '')}"):
+                    if excluir_oferta_bd(row.get('id_oferta', '')): st.rerun()
+            st.markdown("<hr style='margin: 2px 0; border-top: 1px dashed #eee;'>", unsafe_allow_html=True)
