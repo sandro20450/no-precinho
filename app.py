@@ -9,7 +9,7 @@ from streamlit_folium import st_folium
 import urllib.parse
 import os
 import base64
-import re # NOVO: Para saneamento de dados (limpar HTML)
+import re
 
 # =============================================================================
 # --- 1. CONFIGURAÇÕES GERAIS E CSS CUSTOMIZADO ---
@@ -117,13 +117,15 @@ def excluir_oferta_bd(id_oferta):
         return False
     except Exception: return False
 
-# TÁTICA DE SANEAMENTO: Limpa códigos HTML dos campos de preço
+# TÁTICA DE SANEAMENTO: Limpa códigos HTML e R$ presos no banco de dados
 def limpar_html(texto):
-    if not texto or not isinstance(texto, str): return texto
-    # Remove qualquer tag HTML (<...>) do texto
-    padrao_html = re.compile('<.*?>')
-    texto_limpo = re.sub(padrao_html, '', texto)
-    return texto_limpo.strip()
+    if not texto or pd.isna(texto): return ""
+    texto = str(texto)
+    # Arranca qualquer tag HTML (<span...>)
+    texto = re.sub(r'<.*?>', '', texto)
+    # Arranca símbolos que podem ter ficado grudados no erro anterior
+    texto = texto.replace('R$', '').replace('R', '').replace('_', '').strip()
+    return texto
 
 # =============================================================================
 # --- 3. SISTEMA DE LOGIN ---
@@ -222,7 +224,7 @@ if st.session_state.usuario_logado is None:
     m = folium.Map(location=centro_inicial, zoom_start=zoom_inicial)
     
     coordenadas_ativas = []
-    lista_catalogo = [] # Dados para a lista abaixo do mapa
+    lista_catalogo = [] 
     
     if not df_ofertas.empty and not df_lojas.empty:
         ofertas_ativas = df_ofertas[df_ofertas['status_pagamento'].astype(str).str.strip().str.lower() == 'aprovado']
@@ -262,7 +264,6 @@ if st.session_state.usuario_logado is None:
                             
                             coordenadas_ativas.append([lat, lon])
                             
-                            # CORES E ÍCONES 3D
                             cor_clara, cor_escura = "#ff6b6b", "#cc0000" 
                             icone_pin = "shopping-basket"
                             if categoria_loja.lower() in ["farmácia", "farmacia"]: 
@@ -284,9 +285,13 @@ if st.session_state.usuario_logado is None:
                             html_popup = f"<div style='width:240px; font-family:sans-serif;'><h3 style='color:#0066cc; margin:0 0 10px 0; text-align:center; border-bottom:2px solid #0066cc;'>{nome_loja}</h3>"
                             
                             for _, row in produtos_da_loja.iterrows():
-                                prod, p_de, p_por, img = row.get('produto', ''), row.get('preco_de', ''), row.get('preco_por', ''), row.get('link_imagem', '')
+                                prod = str(row.get('produto', ''))
                                 
-                                # Alimentando o catálogo (incluindo categoria para o pin tático)
+                                # APLICAÇÃO DA BLINDAGEM ANTIVÍRUS AQUI
+                                p_de = limpar_html(row.get('preco_de', ''))
+                                p_por = limpar_html(row.get('preco_por', ''))
+                                img = str(row.get('link_imagem', ''))
+                                
                                 lista_catalogo.append({
                                     "loja": nome_loja, "produto": prod, "preco_de": p_de, 
                                     "preco_por": p_por, "categoria": categoria_loja, "lat": lat, "lon": lon
@@ -314,30 +319,27 @@ if st.session_state.usuario_logado is None:
     if st.session_state.alvo_mapa: st.session_state.alvo_mapa = None
 
     # -------------------------------------------------------------
-    # 🛒 CATÁLOGO EM LISTA ABAIXO DO MAPA (V6.1 - APENAS PIN TÁTICO)
+    # 🛒 CATÁLOGO EM LISTA ABAIXO DO MAPA
     # -------------------------------------------------------------
     if lista_catalogo:
         st.markdown("<h3 style='color:#333; margin-top: 30px; margin-bottom: 15px;'>🔥 Destaques da Categoria</h3>", unsafe_allow_html=True)
         
         with st.container(height=480):
             for idx, item in enumerate(lista_catalogo):
-                # Coluna c_img agora é para o PIN tático (largura ajustada para centralizar)
                 c_img, c_texto, c_btn = st.columns([1, 4.5, 1.5], vertical_alignment="center")
                 
                 with c_img:
-                    # Configuração tática do PIN baseada na categoria do item
                     cat = item['categoria']
-                    cor_clara, cor_escura = "#ff6b6b", "#cc0000" # Vermelho
+                    cor_clara, cor_escura = "#ff6b6b", "#cc0000" 
                     icone_list = "shopping-basket"
                     
                     if cat.lower() in ["farmácia", "farmacia"]: 
-                        cor_clara, cor_escura = "#4dabf7", "#0050b3" # Azul
+                        cor_clara, cor_escura = "#4dabf7", "#0050b3" 
                         icone_list = "medkit"
                     elif cat.lower() in ["construção", "construcao"]: 
-                        cor_clara, cor_escura = "#ffa94d", "#d97706" # Laranja
+                        cor_clara, cor_escura = "#ffa94d", "#d97706" 
                         icone_list = "hammer"
                     
-                    # HTML do PIN tático ajustado para exibição na lista
                     pin_list_html = f"""
                     <div style="display:flex; justify-content:center; align-items:center; height: 100%;">
                         <div style="width:40px; height:40px; background:radial-gradient(circle at 30% 30%, {cor_clara}, {cor_escura});
@@ -374,7 +376,7 @@ elif st.session_state.perfil_logado == "admin":
         st.info("💡 Confirme o PIX de R$ 5,00 e mude o status para 'aprovado'.")
         df_ofertas_admin = carregar_tabela("Ofertas")
         if not df_ofertas_admin.empty:
-            # TÁTICA DE SANEAMENTO: Limpa os preços antes de mostrar na tabela
+            # BLINDAGEM NO ADMIN: Limpa o HTML antes de desenhar a tabela para o painel de controle
             df_ofertas_admin['preco_de'] = df_ofertas_admin['preco_de'].apply(limpar_html)
             df_ofertas_admin['preco_por'] = df_ofertas_admin['preco_por'].apply(limpar_html)
             
@@ -426,6 +428,17 @@ elif st.session_state.perfil_logado == "comerciante":
     st.header("🏪 Central do Comerciante")
     df_minhas = carregar_tabela("Ofertas")
     
+    hoje_str = datetime.now().strftime("%Y-%m-%d")
+    qtd_hoje = len(df_minhas[(df_minhas['usuario_loja'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()) & (df_minhas['data_hora'].astype(str).str.startswith(hoje_str))]) if not df_minhas.empty else 0
+    st.markdown(f"<div class='caixa-destaque'>💡 <b>O seu Limite Diário:</b> {qtd_hoje}/5 ofertas enviadas hoje.</div>", unsafe_allow_html=True)
+    
+    df_lojas_comerciante = carregar_tabela("Lojas")
+    nome_fantasia_loja = st.session_state.nome_logado
+    if not df_lojas_comerciante.empty:
+        info_loja = df_lojas_comerciante[df_lojas_comerciante['usuario_dono'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()]
+        if not info_loja.empty:
+            nome_fantasia_loja = str(info_loja.iloc[0].get('nome_fantasia', st.session_state.nome_logado)).strip()
+
     with st.form("form_oferta", clear_on_submit=True):
         st.subheader("🚀 Lançar Nova Oferta")
         p_nome = st.text_input("Produto (Ex: Arroz 5kg)")
@@ -437,20 +450,20 @@ elif st.session_state.perfil_logado == "comerciante":
         btn_enviar = st.form_submit_button("Enviar Oferta", use_container_width=True, type="primary")
         
     if btn_enviar and p_nome and p_por:
-        if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
-            st.success("✅ Oferta enviada!")
-            texto_zap_codificado = urllib.parse.quote(f"Olá Admin! Enviei uma nova oferta: *{p_nome}*.")
-            link_wa_admin = f"https://wa.me/558199964261?text={texto_zap_codificado}"
-            st.markdown(f"<a href='{link_wa_admin}' target='_blank' style='display:block; background-color:#25D366; color:white; text-align:center; padding:10px; border-radius:8px; font-weight:bold; text-decoration:none; margin-top:10px;'>📲 Avisar Admin no WhatsApp</a>", unsafe_allow_html=True)
+        if qtd_hoje >= 5: st.error("❌ Limite atingido!")
+        else:
+            if salvar_nova_oferta(st.session_state.usuario_logado, p_nome, p_de, p_por, p_img):
+                st.success("✅ Oferta enviada!")
+                texto_zap = urllib.parse.quote(f"Olá Admin! A loja *{nome_fantasia_loja}* enviou: *{p_nome}*.")
+                st.markdown(f"<a href='https://wa.me/558199964261?text={texto_zap}' target='_blank' style='display:block; background-color:#25D366; color:white; text-align:center; padding:10px; border-radius:8px; font-weight:bold; text-decoration:none; margin-top:10px;'>📲 Avisar Admin no WhatsApp</a>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.subheader("🗑️ Gerenciar Ofertas")
     if not df_minhas.empty:
         minhas = df_minhas[df_minhas['usuario_loja'].astype(str).str.strip() == str(st.session_state.usuario_logado).strip()]
         for _, row in minhas.iterrows():
-            col_info, col_btn = st.columns([4, 1])
-            with col_info: st.write(f"📦 **{row.get('produto', '')}** — R$ {row.get('preco_por', '')}")
-            with col_btn:
+            c_info, c_btn = st.columns([4, 1])
+            with c_info: st.write(f"📦 **{row.get('produto', '')}** — R$ {limpar_html(row.get('preco_por', ''))}")
+            with c_btn:
                 if st.button("❌", key=f"del_{row.get('id_oferta', '')}"):
                     if excluir_oferta_bd(row.get('id_oferta', '')): st.rerun()
-            st.markdown("<hr style='margin: 2px 0; border-top: 1px dashed #eee;'>", unsafe_allow_html=True)
